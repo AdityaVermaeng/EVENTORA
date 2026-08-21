@@ -4,7 +4,7 @@ const Event = require("../models/Event");
 exports.getEvents = async (req, res) => {
 	try{
 		const filters ={};
-		if(req.quary.category) filters.category = req.query.category;
+		if(req.query.category) filters.category = req.query.category;
 		if(req.query.search) filters.title = { $regex: req.query.search, $options: "i" };
 
 		const events = await Event.find(filters).populate('createBy', 'name email').res.json(events);
@@ -16,9 +16,9 @@ exports.getEvents = async (req, res) => {
 
 exports.getEventById = async (req, res) => {
 	try{
-		const event = await Event.findById(req.params.id).populate('createBy', 'name email');
+		const events = await Event.findById(req.params.id).populate('createBy', 'name email');
 		if(!event) return res.status(404).json({ message: "Event not found" });
-		res.json(event);
+		res.json(events);
 	} catch(error){
 		res.status(500).json({ message: "Server error", error: error.message });
 	}
