@@ -30,7 +30,7 @@ MongoDB Atlas provides a fully managed, free cloud database. This is where `mong
    - Click the **"Connect"** button on your new cluster.
    - Choose **"Drivers"** (Connect your application).
    - Copy the connection string provided. It will look something like this:
-     mongodb+srv://eventoradmin:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+     mongodb+srv://eventoradmin:password@username.net/?retryWrites=true&w=majority
    - **Important**: Replace `<password>` in the string with the actual password you created in Step 3. (Do not include the `< >` brackets).
 
 ---
