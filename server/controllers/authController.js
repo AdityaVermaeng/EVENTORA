@@ -12,7 +12,12 @@ const generateToken = (id, role) => {
 
 exports.register = async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        let { name, email, password } = req.body;
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+        email = email.trim().toLowerCase();
+
         let user = await User.findOne({ email });
         if (user) return res.status(400).json({ message: 'User already exists' });
 
@@ -20,7 +25,7 @@ exports.register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         user = await User.create({
-            name,
+            name: name.trim(),
             email,
             password: hashedPassword,
             role: 'user', // Hardcoded to prevent frontend passing role
@@ -42,7 +47,12 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        let { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
+        email = email.trim().toLowerCase();
+
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
@@ -71,7 +81,13 @@ exports.login = async (req, res) => {
 
 exports.verifyOTP = async (req, res) => {
     try {
-        const { email, otp } = req.body;
+        let { email, otp } = req.body;
+        if (!email || !otp) {
+            return res.status(400).json({ message: 'Email and OTP are required' });
+        }
+        email = email.trim().toLowerCase();
+        otp = otp.trim();
+
         const validOTP = await OTP.findOne({ email, otp, action: 'account_verification' });
 
         if (!validOTP) {
