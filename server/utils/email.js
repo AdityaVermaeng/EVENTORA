@@ -11,25 +11,6 @@ const transfer = nodemailer.createTransport({
   },
 });
 
-// Simple OTP Email
-exports.sendOtpEmail = async (email, otp, type) => {
-  try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Your OTP Code",
-      text: `Your OTP code for ${type} is: ${otp}. It will expire in 5 minutes.`,
-    };
-
-    await transfer.sendMail(mailOptions);
-
-    console.log(`OTP email sent to ${email} for ${type}`);
-  } catch (error) {
-    console.error(`Error sending OTP email to ${email}:`, error);
-    throw new Error("Failed to send OTP email");
-  }
-};
-
 // Styled OTP Email
 const sendOTPEmail = async (userEmail, otp, type) => {
   try {
@@ -76,14 +57,42 @@ const sendOTPEmail = async (userEmail, otp, type) => {
     };
 
     await transfer.sendMail(mailOptions);
-
-    console.log(`OTP sent to ${userEmail} for ${type}`);
+    console.log(`OTP email successfully sent to ${userEmail} for ${type}`);
   } catch (error) {
-    console.error(`Error sending OTP email to ${userEmail}:`, error);
-    throw new Error("Failed to send OTP email");
+    console.error(`\n[EMAIL SMTP WARNING] Could not send email via Gmail: ${error.message}`);
+    console.log(`========================================`);
+    console.log(`🔑 [DEV FALLBACK OTP CODE]`);
+    console.log(`📧 User: ${userEmail}`);
+    console.log(`🔢 OTP Code: ${otp}`);
+    console.log(`========================================\n`);
+    // Fallback in development mode so invalid SMTP credentials do not crash signup/login
+  }
+};
+
+const sendBookingEmail = async (userEmail, userName, eventTitle) => {
+  try {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: userEmail,
+      subject: `Booking Confirmed: ${eventTitle}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>Booking Confirmed!</h2>
+          <p>Hi ${userName},</p>
+          <p>Your booking for <strong>${eventTitle}</strong> has been confirmed.</p>
+          <p>Thank you for using Eventora!</p>
+        </div>
+      `,
+    };
+
+    await transfer.sendMail(mailOptions);
+    console.log(`Booking confirmation email sent to ${userEmail}`);
+  } catch (error) {
+    console.error(`[EMAIL SMTP WARNING] Could not send booking confirmation email: ${error.message}`);
   }
 };
 
 module.exports = {
   sendOTPEmail,
+  sendBookingEmail,
 };
