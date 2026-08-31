@@ -1,152 +1,558 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/axios';
-import { FaCalendarAlt, FaMapMarkerAlt, FaSearch, FaRegClock, FaTicketAlt, FaShieldAlt } from 'react-icons/fa';
+import { AuthContext } from '../context/AuthContext';
+import {
+    FaTicketAlt, FaCalendarAlt, FaPlus, FaEdit, FaTrash, FaCheck, FaTimes,
+    FaMoneyBillWave, FaClock, FaUsers, FaChartLine, FaCheckCircle, FaExclamationTriangle
+} from 'react-icons/fa';
 
-const Home = () => {
+const AdminDashboard = () => {
+    const { user } = useContext(AuthContext);
+    const navigate = useNavigate();
+
+    const [activeTab, setActiveTab] = useState('bookings'); // 'bookings' or 'events'
+    const [bookings, setBookings] = useState([]);
     const [events, setEvents] = useState([]);
-    const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
+    const [bookingFilter, setBookingFilter] = useState('all'); // 'all', 'pending', 'confirmed', 'cancelled'
+    const [actionLoading, setActionLoading] = useState(null);
+    const [feedback, setFeedback] = useState({ message: '', type: '' });
+
+    // Modal state for Create / Edit Event
+    const [showEventModal, setShowEventModal] = useState(false);
+    const [editingEvent, setEditingEvent] = useState(null);
+    const [eventForm, setEventForm] = useState({
+        title: '',
+        description: '',
+        date: '',
+        location: '',
+        category: 'Technology',
+        totalSeats: 50,
+        ticketPrice: 0,
+        image: ''
+    });
 
     useEffect(() => {
-        const timeoutId = setTimeout(() => {
-            fetchEvents();
-        }, 400); // 400ms debounce
-        return () => clearTimeout(timeoutId);
-    }, [search]);
+        if (!user || user.role !== 'admin') {
+            navigate('/login');
+            return;
+        }
+        fetchDashboardData();
+    }, [user, navigate]);
 
-    const fetchEvents = async () => {
+    const fetchDashboardData = async () => {
+        setLoading(true);
         try {
-            const { data } = await api.get(`/events?search=${search}`);
-            setEvents(data);
-        } catch (error) {
-            console.error('Error fetching events:', error);
+            const [bookingsRes, eventsRes] = await Promise.all([
+                api.get('/bookings/my'),
+                api.get('/events')
+            ]);
+            setBookings(bookingsRes.data);
+            setEvents(eventsRes.data);
+        } catch (err) {
+            console.error('Error loading admin dashboard data:', err);
+            showFeedback('Failed to load dashboard data.', 'error');
         } finally {
             setLoading(false);
         }
     };
 
+    const showFeedback = (message, type = 'success') => {
+        setFeedback({ message, type });
+        setTimeout(() => setFeedback({ message: '', type: '' }), 4000);
+    };
+
+    const handleConfirmBooking = async (bookingId, paymentStatus) => {
+        setActionLoading(bookingId);
+        try {
+            await api.put(`/bookings/${bookingId}/confirm`, { paymentStatus });
+            showFeedback(`Booking confirmed (${paymentStatus === 'paid' ? 'Paid' : 'Not Paid'}). Notification email sent.`);
+            fetchDashboardData();
+        } catch (err) {
+            showFeedback(err.response?.data?.message || 'Failed to confirm booking.', 'error');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const handleCancelBooking = async (bookingId) => {
+        if (!window.confirm('Are you sure you want to cancel/reject this booking request?')) return;
+        setActionLoading(bookingId);
+        try {
+            await api.delete(`/bookings/${bookingId}`);
+            showFeedback('Booking cancelled successfully.');
+            fetchDashboardData();
+        } catch (err) {
+            showFeedback(err.response?.data?.message || 'Failed to cancel booking.', 'error');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const handleOpenCreateModal = () => {
+        setEditingEvent(null);
+        setEventForm({
+            title: '',
+            description: '',
+            date: '',
+            location: '',
+            category: 'Technology',
+            totalSeats: 50,
+            ticketPrice: 0,
+            image: ''
+        });
+        setShowEventModal(true);
+    };
+
+    const handleOpenEditModal = (eventObj) => {
+        setEditingEvent(eventObj);
+        setEventForm({
+            title: eventObj.title || '',
+            description: eventObj.description || '',
+            date: eventObj.date ? new Date(eventObj.date).toISOString().split('T')[0] : '',
+            location: eventObj.location || '',
+            category: eventObj.category || 'Technology',
+            totalSeats: eventObj.totalSeats || 50,
+            ticketPrice: eventObj.ticketPrice || 0,
+            image: eventObj.image || ''
+        });
+        setShowEventModal(true);
+    };
+
+    const handleSaveEvent = async (e) => {
+        e.preventDefault();
+        try {
+            if (editingEvent) {
+                await api.put(`/events/${editingEvent._id}`, eventForm);
+                showFeedback('Event updated successfully!');
+            } else {
+                await api.post('/events', eventForm);
+                showFeedback('New event created successfully!');
+            }
+            setShowEventModal(false);
+            fetchDashboardData();
+        } catch (err) {
+            showFeedback(err.response?.data?.message || 'Failed to save event.', 'error');
+        }
+    };
+
+    const handleDeleteEvent = async (eventId) => {
+        if (!window.confirm('Are you sure you want to delete this event? This action cannot be undone.')) return;
+        try {
+            await api.delete(`/events/${eventId}`);
+            showFeedback('Event deleted successfully.');
+            fetchDashboardData();
+        } catch (err) {
+            showFeedback(err.response?.data?.message || 'Failed to delete event.', 'error');
+        }
+    };
+
+    // Calculate Analytics
+    const pendingBookingsCount = bookings.filter(b => b.status === 'pending').length;
+    const confirmedPaidBookingsCount = bookings.filter(b => b.status === 'confirmed' && b.paymentStatus === 'paid').length;
+    const totalRevenue = bookings
+        .filter(b => b.status === 'confirmed' && b.paymentStatus === 'paid')
+        .reduce((sum, b) => sum + (b.amount || 0), 0);
+
+    const filteredBookings = bookings.filter(b => {
+        if (bookingFilter === 'all') return true;
+        return b.status === bookingFilter;
+    });
+
+    if (loading) return <div className="text-center py-20 text-xl font-semibold">Loading Admin Dashboard...</div>;
+
     return (
-        <div className="flex flex-col min-h-screen">
-            {/* Hero Section */}
-            <div className="relative bg-black text-white rounded-3xl overflow-hidden mb-12 shadow-2xl">
-                <div className="absolute inset-0 opacity-40 bg-[url('https://images.unsplash.com/photo-1459749411175-04bf5292ceea?q=80&w=3000&auto=format&fit=crop')] bg-cover bg-center"></div>
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent"></div>
-                <div className="relative p-10 md:p-20 text-center flex flex-col items-center z-10">
-                    <span className="bg-white/20 text-white backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase mb-6 border border-white/20">Welcome to Eventora</span>
-                    <h1 className="text-5xl md:text-7xl font-black mb-6 leading-tight tracking-tight drop-shadow-lg">
-                        Find Your Next <br /><span className="text-transparent bg-clip-text bg-gradient-to-r from-gray-200 to-gray-500">Unforgettable</span> Experience
-                    </h1>
-                    <p className="text-gray-300 text-lg md:text-xl mb-10 max-w-2xl mx-auto font-light leading-relaxed">
-                        Discover the best tech conferences, late-night music festivals, and hands-on workshops happening directly in your area. Secure your spot today.
-                    </p>
-
-                    <div className="w-full max-w-2xl mx-auto relative flex items-center shadow-2xl group">
-                        <FaSearch className="absolute left-6 text-gray-500 text-xl group-focus-within:text-black transition-colors" />
-                        <input
-                            type="text"
-                            placeholder="Search events by title..."
-                            className="w-full pl-16 pr-6 py-5 rounded-full text-lg text-black bg-white/95 backdrop-blur-sm border-2 border-transparent focus:border-gray-500 focus:outline-none transition-all placeholder-gray-400 font-medium"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
+        <div className="max-w-7xl mx-auto pb-12">
+            {/* Top Banner */}
+            <div className="bg-gray-900 text-white rounded-3xl p-8 mb-8 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                <div>
+                    <span className="bg-white/10 text-white backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border border-white/20">
+                        Admin Portal
+                    </span>
+                    <h1 className="text-3xl sm:text-4xl font-extrabold mt-3">Organizer Dashboard</h1>
+                    <p className="text-gray-400 text-sm sm:text-base mt-1">Manage events, approve booking requests, and track real-time platform revenue.</p>
                 </div>
+                <button
+                    onClick={handleOpenCreateModal}
+                    className="bg-white text-gray-900 hover:bg-gray-100 px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg transition hover:-translate-y-0.5"
+                >
+                    <FaPlus /> Create New Event
+                </button>
             </div>
 
-            {/* Why Choose Us / Features row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16 px-4">
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center hover:-translate-y-1 transition duration-300">
-                    <div className="w-16 h-16 bg-gray-900 text-white rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-md shadow-gray-200/50">
-                        <FaRegClock />
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-3">Fast Booking</h3>
-                    <p className="text-gray-500 text-sm leading-relaxed">Secure your tickets instantly with our fast streamlined booking infrastructure built for speed.</p>
-                </div>
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center hover:-translate-y-1 transition duration-300">
-                    <div className="w-16 h-16 bg-gray-900 text-white rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-md shadow-gray-200/50">
-                        <FaTicketAlt />
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-3">Seamless Access</h3>
-                    <p className="text-gray-500 text-sm leading-relaxed">Download tickets instantly or manage them right from your personal dashboard with easily.</p>
-                </div>
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center hover:-translate-y-1 transition duration-300">
-                    <div className="w-16 h-16 bg-gray-900 text-white rounded-2xl flex items-center justify-center text-2xl mb-6 shadow-md shadow-gray-200/50">
-                        <FaShieldAlt />
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-3">Secure Platform</h3>
-                    <p className="text-gray-500 text-sm leading-relaxed">All transactions and registrations are bounded by cutting-edge security and 2FA OTP tech.</p>
-                </div>
-            </div>
-
-            <div className="flex items-center justify-between mb-8 px-2 border-b border-gray-200 pb-4">
-                <h2 className="text-3xl font-extrabold text-gray-900">Upcoming Events</h2>
-                <div className="text-gray-500 font-medium">{events.length} results found</div>
-            </div>
-
-            {loading ? (
-                <div className="text-center py-20 text-xl font-semibold text-gray-600">Loading events...</div>
-            ) : events.length === 0 ? (
-                <div className="text-center py-20 text-xl text-gray-500">No events found matching your search.</div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {events.map(event => (
-                        <div key={event._id} className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition flex flex-col">
-                            <div className="h-48 bg-gray-200 overflow-hidden relative">
-                                {event.image ? (
-                                    <img src={event.image} alt={event.title} className="w-full h-full object-cover" />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-600 font-bold text-2xl">
-                                        {event.category || 'Event'}
-                                    </div>
-                                )}
-                                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-bold shadow-sm">
-                                    {event.ticketPrice === 0 ? <span className="text-green-600">FREE</span> : <span className="text-gray-900">₹{event.ticketPrice}</span>}
-                                </div>
-                            </div>
-                            <div className="p-6 flex-grow flex flex-col">
-                                <div className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">{event.category}</div>
-                                <h2 className="text-xl font-bold text-gray-800 mb-3">{event.title}</h2>
-                                <div className="flex flex-col gap-2 mb-4 text-gray-600 text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <FaCalendarAlt className="text-gray-400" />
-                                        <span>{new Date(event.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <FaMapMarkerAlt className="text-gray-400" />
-                                        <span>{event.location}</span>
-                                    </div>
-                                </div>
-                                <div className="mt-auto">
-                                    <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                                        <div className="bg-gray-700 h-2 rounded-full" style={{ width: `${(event.availableSeats / event.totalSeats) * 100}%` }}></div>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mb-4">{event.availableSeats} of {event.totalSeats} seats remaining</p>
-                                    <Link to={`/events/${event._id}`} className="block w-full text-center bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold py-2 rounded-lg transition">
-                                        View Details
-                                    </Link>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
+            {/* Notification Toast */}
+            {feedback.message && (
+                <div className={`mb-6 p-4 rounded-xl font-semibold text-sm border shadow-sm flex items-center justify-between ${feedback.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'
+                    }`}>
+                    <span>{feedback.message}</span>
+                    <button onClick={() => setFeedback({ message: '', type: '' })} className="font-bold text-lg">&times;</button>
                 </div>
             )}
 
-            {/* Footer Section */}
-            <footer className="mt-auto pt-16 pb-8 border-t border-gray-200 text-center">
-                <div className="flex justify-center items-center gap-2 mb-4">
-                    <FaTicketAlt className="text-gray-800 text-2xl" />
-                    <span className="text-xl font-bold text-gray-900">Eventora</span>
+            {/* Analytics Stats Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-yellow-50 text-yellow-600 flex items-center justify-center text-2xl shrink-0">
+                        <FaClock />
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Pending Requests</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{pendingBookingsCount}</p>
+                    </div>
                 </div>
-                <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
-                    The simplest, most dynamic way to manage, discover, and host world-class events in your local city. Let's make memories together.
-                </p>
-                <div className="text-xs text-gray-400 font-medium uppercase tracking-wider">
-                    &copy; {new Date().getFullYear()} Eventora Platform. All rights reserved.
+
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center text-2xl shrink-0">
+                        <FaCheckCircle />
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Confirmed Paid Clients</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{confirmedPaidBookingsCount}</p>
+                    </div>
                 </div>
-            </footer>
+
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl shrink-0">
+                        <FaMoneyBillWave />
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Total Revenue</p>
+                        <p className="text-3xl font-extrabold text-gray-900">₹{totalRevenue.toLocaleString()}</p>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-2xl shrink-0">
+                        <FaCalendarAlt />
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Total Events</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{events.length}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-200 mb-8">
+                <button
+                    onClick={() => setActiveTab('bookings')}
+                    className={`pb-4 px-6 font-bold text-lg border-b-2 transition flex items-center gap-2 ${activeTab === 'bookings'
+                        ? 'border-gray-900 text-gray-900'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                        }`}
+                >
+                    <FaTicketAlt /> Booking Requests ({bookings.length})
+                </button>
+                <button
+                    onClick={() => setActiveTab('events')}
+                    className={`pb-4 px-6 font-bold text-lg border-b-2 transition flex items-center gap-2 ${activeTab === 'events'
+                        ? 'border-gray-900 text-gray-900'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                        }`}
+                >
+                    <FaCalendarAlt /> Manage Events ({events.length})
+                </button>
+            </div>
+
+            {/* TAB 1: BOOKING REQUESTS */}
+            {activeTab === 'bookings' && (
+                <div>
+                    {/* Status Filter Sub-tabs */}
+                    <div className="flex flex-wrap gap-2 mb-6">
+                        {['all', 'pending', 'confirmed', 'cancelled'].map(status => (
+                            <button
+                                key={status}
+                                onClick={() => setBookingFilter(status)}
+                                className={`px-4 py-2 rounded-xl text-sm font-bold capitalize transition ${bookingFilter === status
+                                    ? 'bg-gray-900 text-white shadow-sm'
+                                    : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                                    }`}
+                            >
+                                {status}
+                            </button>
+                        ))}
+                    </div>
+
+                    {filteredBookings.length === 0 ? (
+                        <div className="bg-white rounded-2xl p-12 text-center border border-gray-100 shadow-sm text-gray-500">
+                            No booking requests found for status "{bookingFilter}".
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-gray-50 text-gray-500 uppercase text-xs font-extrabold tracking-wider border-b border-gray-100">
+                                            <th className="p-4">User</th>
+                                            <th className="p-4">Event</th>
+                                            <th className="p-4">Amount</th>
+                                            <th className="p-4">Status</th>
+                                            <th className="p-4">Payment</th>
+                                            <th className="p-4">Requested At</th>
+                                            <th className="p-4 text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-sm">
+                                        {filteredBookings.map((b) => (
+                                            <tr key={b._id} className="hover:bg-gray-50/50 transition">
+                                                <td className="p-4">
+                                                    <p className="font-bold text-gray-900">{b.userId?.name || 'N/A'}</p>
+                                                    <p className="text-xs text-gray-500">{b.userId?.email || 'N/A'}</p>
+                                                </td>
+                                                <td className="p-4 font-semibold text-gray-800">
+                                                    {b.eventId?.title || <span className="text-red-400 italic">Deleted Event</span>}
+                                                </td>
+                                                <td className="p-4 font-bold text-gray-900">
+                                                    {b.amount === 0 ? <span className="text-green-600">Free</span> : `₹${b.amount}`}
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full uppercase tracking-wider ${b.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                                                        b.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                                                            'bg-yellow-100 text-yellow-700'
+                                                        }`}>
+                                                        {b.status}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full uppercase tracking-wider ${b.paymentStatus === 'paid' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                                                        }`}>
+                                                        {b.paymentStatus.replace('_', ' ')}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-gray-500">
+                                                    {new Date(b.bookedAt || b.createdAt).toLocaleDateString()}
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    {b.status === 'pending' ? (
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <button
+                                                                onClick={() => handleConfirmBooking(b._id, 'paid')}
+                                                                disabled={actionLoading === b._id}
+                                                                className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                                                                title="Confirm & Mark Paid"
+                                                            >
+                                                                <FaCheck /> Confirm (Paid)
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleConfirmBooking(b._id, 'not_paid')}
+                                                                disabled={actionLoading === b._id}
+                                                                className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                                                                title="Confirm & Mark Unpaid"
+                                                            >
+                                                                <FaCheck /> Confirm (Unpaid)
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCancelBooking(b._id)}
+                                                                disabled={actionLoading === b._id}
+                                                                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                                                                title="Reject Request"
+                                                            >
+                                                                <FaTimes /> Reject
+                                                            </button>
+                                                        </div>
+                                                    ) : b.status === 'confirmed' ? (
+                                                        <button
+                                                            onClick={() => handleCancelBooking(b._id)}
+                                                            disabled={actionLoading === b._id}
+                                                            className="text-red-500 hover:text-red-700 text-xs font-bold hover:underline"
+                                                        >
+                                                            Cancel Booking
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-xs italic">No actions</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* TAB 2: EVENT MANAGEMENT */}
+            {activeTab === 'events' && (
+                <div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {events.map((eventObj) => (
+                            <div key={eventObj._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition">
+                                <div className="h-40 bg-gray-100 relative overflow-hidden">
+                                    {eventObj.image ? (
+                                        <img src={eventObj.image} alt={eventObj.title} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-gray-400 font-bold uppercase tracking-widest text-lg">
+                                            {eventObj.category}
+                                        </div>
+                                    )}
+                                    <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-extrabold shadow-sm">
+                                        {eventObj.ticketPrice === 0 ? <span className="text-green-600">FREE</span> : `₹${eventObj.ticketPrice}`}
+                                    </div>
+                                </div>
+
+                                <div className="p-6 flex-grow flex flex-col">
+                                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">{eventObj.category}</div>
+                                    <h3 className="text-lg font-bold text-gray-900 mb-2">{eventObj.title}</h3>
+                                    <p className="text-gray-500 text-xs line-clamp-2 mb-4">{eventObj.description}</p>
+
+                                    <div className="mt-auto space-y-2 text-xs text-gray-600 border-t border-gray-50 pt-4 mb-4">
+                                        <p><strong>Date:</strong> {new Date(eventObj.date).toLocaleDateString()}</p>
+                                        <p><strong>Location:</strong> {eventObj.location}</p>
+                                        <p><strong>Seats:</strong> <span className="font-bold text-gray-900">{eventObj.availableSeats}</span> / {eventObj.totalSeats} available</p>
+                                    </div>
+
+                                    <div className="flex gap-2 shrink-0">
+                                        <button
+                                            onClick={() => handleOpenEditModal(eventObj)}
+                                            className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg text-xs transition flex items-center justify-center gap-1"
+                                        >
+                                            <FaEdit /> Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteEvent(eventObj._id)}
+                                            className="py-2 px-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg text-xs transition flex items-center justify-center"
+                                            title="Delete Event"
+                                        >
+                                            <FaTrash />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Create / Edit Event Modal */}
+            {showEventModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative my-8">
+                        <h2 className="text-2xl font-extrabold text-gray-900 mb-6">
+                            {editingEvent ? 'Edit Event' : 'Create New Event'}
+                        </h2>
+
+                        <form onSubmit={handleSaveEvent} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Event Title</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                    value={eventForm.title}
+                                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Description</label>
+                                <textarea
+                                    rows="3"
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                    value={eventForm.description}
+                                    onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Date</label>
+                                    <input
+                                        type="date"
+                                        required
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.date}
+                                        onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Category</label>
+                                    <select
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.category}
+                                        onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
+                                    >
+                                        <option value="Technology">Technology</option>
+                                        <option value="Music">Music</option>
+                                        <option value="Business">Business</option>
+                                        <option value="Workshop">Workshop</option>
+                                        <option value="Sports">Sports</option>
+                                        <option value="General">General</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Location</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.location}
+                                        onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Total Capacity / Seats</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="1"
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.totalSeats}
+                                        onChange={(e) => setEventForm({ ...eventForm, totalSeats: Number(e.target.value) })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Ticket Price (₹) - 0 for Free</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="0"
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.ticketPrice}
+                                        onChange={(e) => setEventForm({ ...eventForm, ticketPrice: Number(e.target.value) })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Image URL (Optional)</label>
+                                    <input
+                                        type="url"
+                                        placeholder="https://images.unsplash.com/..."
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-900 outline-none text-sm font-medium"
+                                        value={eventForm.image}
+                                        onChange={(e) => setEventForm({ ...eventForm, image: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowEventModal(false)}
+                                    className="px-6 py-3 rounded-xl text-gray-600 hover:bg-gray-100 font-bold text-sm transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-6 py-3 rounded-xl bg-gray-900 hover:bg-black text-white font-bold text-sm transition shadow-md"
+                                >
+                                    {editingEvent ? 'Update Event' : 'Create Event'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
-export default Home;
+export default AdminDashboard;
