@@ -19,11 +19,11 @@ const Login = () => {
         setError('');
         try {
             if (!showOTP) {
-                const data = await login(email, password);
+                const data = await login(email.trim().toLowerCase(), password);
                 if (data.role === 'admin') navigate('/admin');
                 else navigate('/dashboard');
             } else {
-                const data = await verifyOTP(email, otp);
+                const data = await verifyOTP(email.trim().toLowerCase(), otp.trim());
                 if (data.role === 'admin') navigate('/admin');
                 else navigate('/dashboard');
             }
