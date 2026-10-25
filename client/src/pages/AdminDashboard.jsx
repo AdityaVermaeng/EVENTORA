@@ -392,7 +392,7 @@ const AdminDashboard = () => {
                                     </div>
                                 </div>
 
-                                <div className="p-6 flex-grow flex flex-col">
+                                <div className="p-6 grow flex flex-col">
                                     <div className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">{eventObj.category}</div>
                                     <h3 className="text-lg font-bold text-gray-900 mb-2">{eventObj.title}</h3>
                                     <p className="text-gray-500 text-xs line-clamp-2 mb-4">{eventObj.description}</p>
